@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title><%= channel.name %> - TV Player</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body
+    class="bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 min-h-screen"
+  >
+    <div class="container mx-auto px-4 py-8">
+      <!-- Channel Info -->
+      <div class="text-center mb-8">
+        <h1
+          class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-500 mb-3"
+        >
+          <%= channel.name %>
+        </h1>
+        <div class="flex justify-center items-center space-x-4">
+          <div
+            id="live-indicator"
+            class="flex items-center bg-red-500/10 px-3 py-1 rounded-full"
+          >
+            <div
+              class="w-2 h-2 bg-red-500 rounded-full animate-pulse mr-2"
+            ></div>
+            <span class="text-red-400 font-medium text-sm">LIVE</span>
+          </div>
+          <div
+            id="delay-info"
+            class="hidden text-yellow-400 text-sm bg-yellow-500/10 px-3 py-1 rounded-full"
+          ></div>
+        </div>
+      </div>
+
+      <!-- Video Player Container -->
+      <div
+        class="max-w-4xl mx-auto rounded-2xl overflow-hidden shadow-2xl bg-black/50 backdrop-blur-sm relative"
+      >
+        <div class="aspect-video relative">
+          <video
+            id="video"
+            class="w-full h-full object-contain"
+            controls
+            autoplay
+            muted
+            playsinline
+          ></video>
+
+          <!-- Loading State -->
+          <div
+            id="loading"
+            class="absolute inset-0 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          >
+            <div class="text-center">
+              <div
+                class="animate-spin rounded-full h-14 w-14 border-4 border-blue-500 border-t-transparent mx-auto mb-4"
+              ></div>
+              <p class="text-white/90 text-lg font-medium">Loading stream...</p>
+            </div>
+          </div>
+
+          <!-- Go Live Button -->
+          <div id="go-live-btn" class="hidden absolute top-4 right-4">
+            <button
+              class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg shadow-lg transform transition-all duration-200 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+            >
+              <div class="flex items-center">
+                <div
+                  class="w-2 h-2 bg-white rounded-full animate-pulse mr-2"
+                ></div>
+                <span class="text-sm font-medium">GO LIVE</span>
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Error Message -->
+      <div id="error-message" class="hidden mt-6 mx-auto max-w-2xl">
+        <div
+          class="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-red-400 text-center"
+        ></div>
+      </div>
+
+      <!-- Stream Info -->
+      <div class="mt-6 text-center">
+        <div
+          id="stream-info"
+          class="text-gray-400 text-sm bg-white/5 inline-block px-4 py-2 rounded-full"
+        ></div>
+      </div>
+
+      <!-- Back Button -->
+      <div class="text-center mt-8">
+        <a
+          href="/"
+          class="inline-flex items-center px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg transition-all duration-200 hover:scale-105 hover:shadow-lg hover:shadow-blue-500/20"
+        >
+          <svg
+            class="w-5 h-5 mr-2"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M10 19l-7-7m0 0l7-7m-7 7h18"
+            />
+          </svg>
+          Back to Channels
+        </a>
+      </div>
+    </div>
+
+    <!-- Keep existing scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+      const embedCode = "<%= channel.embedCode %>";
+      const video = document.getElementById("video");
+      const loading = document.getElementById("loading");
+      const errorMessage = document.getElementById("error-message");
+      const liveIndicator = document.getElementById("live-indicator");
+      const delayInfo = document.getElementById("delay-info");
+      const goLiveBtn = document.getElementById("go-live-btn");
+      const streamInfo = document.getElementById("stream-info");
+
+      let hls = null;
+      let liveCheckInterval = null;
+      let isLive = false;
+      const LIVE_THRESHOLD = 10; // seconds behind live edge to show "GO LIVE" button
+
+      function showError(message) {
+        loading.classList.add("hidden");
+        errorMessage.textContent = message;
+        errorMessage.classList.remove("hidden");
+      }
+
+      function hideLoading() {
+        loading.classList.add("hidden");
+      }
+
+      function updateLiveStatus() {
+        if (!hls || !video.duration) return;
+
+        const bufferEnd =
+          video.buffered.length > 0
+            ? video.buffered.end(video.buffered.length - 1)
+            : 0;
+        const currentTime = video.currentTime;
+        const liveEdge = hls.liveSyncPosition || bufferEnd;
+        const delay = liveEdge - currentTime;
+
+        if (delay > LIVE_THRESHOLD) {
+          // Stream is behind, show GO LIVE button
+          goLiveBtn.classList.remove("hidden");
+          delayInfo.textContent = `${Math.floor(delay)}s behind live`;
+          delayInfo.classList.remove("hidden");
+          liveIndicator.classList.add("hidden");
+          isLive = false;
+        } else {
+          // Stream is live or close to live
+          goLiveBtn.classList.add("hidden");
+          delayInfo.classList.add("hidden");
+          liveIndicator.classList.remove("hidden");
+          isLive = true;
+        }
+
+        // Update stream info
+        streamInfo.textContent = `Buffer: ${Math.floor(
+          bufferEnd - currentTime
+        )}s | Quality: ${
+          hls.currentLevel >= 0
+            ? hls.levels[hls.currentLevel].height + "p"
+            : "Auto"
+        }`;
+      }
+
+      function goLive() {
+        if (!hls) return;
+
+        // Seek to live edge
+        const liveEdge = hls.liveSyncPosition;
+        if (liveEdge) {
+          video.currentTime = liveEdge - 1; // Go slightly before live edge to avoid issues
+          console.log("Seeking to live edge:", liveEdge);
+        }
+      }
+
+      if (Hls.isSupported()) {
+        hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 90,
+          liveDurationInfinity: true,
+          liveMaxLatencyDuration: 5,
+          liveSyncDuration: 2,
+          liveBackBufferLength: 0,
+          maxBufferSize: 60 * 1000 * 1000,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 120,
+          startLevel: -1, // Auto quality selection
+        });
+
+        hls.loadSource(embedCode);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, function (event, data) {
+          console.log(
+            "Stream loaded successfully with",
+            data.levels.length,
+            "quality levels"
+          );
+          hideLoading();
+
+          // Auto-start playback
+          video
+            .play()
+            .then(() => {
+              console.log("Autoplay started successfully");
+              // Start live status monitoring
+              liveCheckInterval = setInterval(updateLiveStatus, 1000);
+            })
+            .catch((error) => {
+              console.log("Autoplay failed, user interaction required:", error);
+              // Show a message that user needs to interact
+              streamInfo.textContent = "Click on the video to start playback";
+            });
+        });
+
+        hls.on(Hls.Events.ERROR, function (event, data) {
+          console.error("HLS error:", data);
+
+          if (data.fatal) {
+            if (liveCheckInterval) {
+              clearInterval(liveCheckInterval);
+            }
+
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.log("Network error, trying to recover...");
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.log("Media error, trying to recover...");
+                hls.recoverMediaError();
+                break;
+              default:
+                hls.destroy();
+                if (data.response && data.response.code === 403) {
+                  showError(
+                    "Stream access blocked. Please try a different stream."
+                  );
+                } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                  showError(
+                    "Network error. Please check your connection and try again."
+                  );
+                } else {
+                  showError(
+                    "Unable to play this stream. Please try a different stream."
+                  );
+                }
+                break;
+            }
+          }
+        });
+
+        // Handle live sync events
+        hls.on(Hls.Events.LEVEL_UPDATED, function (event, data) {
+          updateLiveStatus();
+        });
+
+        window.hlsInstance = hls;
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+        video.src = embedCode;
+
+        video.addEventListener("loadedmetadata", function () {
+          hideLoading();
+
+          // Auto-start playback for Safari
+          video
+            .play()
+            .then(() => {
+              console.log("Autoplay started successfully");
+              liveIndicator.classList.remove("hidden");
+            })
+            .catch((error) => {
+              console.log("Autoplay failed:", error);
+              streamInfo.textContent = "Click on the video to start playback";
+            });
+        });
+
+        video.addEventListener("error", function (e) {
+          showError("Failed to load stream. Please try a different stream.");
+        });
+
+        // For native HLS, we can't detect live edge as precisely, so just show as live
+        video.addEventListener("playing", function () {
+          liveIndicator.classList.remove("hidden");
+        });
+      } else {
+        showError(
+          "Your browser doesn't support HLS streaming. Please use a modern browser."
+        );
+      }
+
+      // Go Live button click handler
+      goLiveBtn.addEventListener("click", function () {
+        goLive();
+      });
+
+      // Video click handler for manual play/pause
+      video.addEventListener("click", function () {
+        if (video.paused) {
+          video.play();
+        } else {
+          video.pause();
+        }
+      });
+
+      // Handle seeking - update live status when user seeks
+      video.addEventListener("seeked", function () {
+        setTimeout(updateLiveStatus, 500); // Small delay to let buffer update
+      });
+
+      // Handle playing state
+      video.addEventListener("playing", function () {
+        if (streamInfo.textContent === "Click on the video to start playback") {
+          streamInfo.textContent = "";
+        }
+      });
+
+      // Cleanup
+      window.addEventListener("beforeunload", function () {
+        if (liveCheckInterval) {
+          clearInterval(liveCheckInterval);
+        }
+        if (window.hlsInstance) {
+          window.hlsInstance.destroy();
+        }
+      });
+
+      // Visibility change handler - pause/resume monitoring when tab is not visible
+      document.addEventListener("visibilitychange", function () {
+        if (document.hidden) {
+          if (liveCheckInterval) {
+            clearInterval(liveCheckInterval);
+          }
+        } else {
+          if (hls && video && !video.paused) {
+            liveCheckInterval = setInterval(updateLiveStatus, 1000);
+          }
+        }
+      });
+    </script>
+  </body>
+</html>

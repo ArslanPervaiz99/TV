@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test Player - <%= channel.name %></title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      video {
+        border: 2px solid #ccc;
+      }
+      button {
+        padding: 10px 15px;
+        margin: 5px;
+        background: #007bff;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #0056b3;
+      }
+      #debug {
+        margin-top: 20px;
+        padding: 15px;
+        background: #f8f9fa;
+        border: 1px solid #ddd;
+      }
+      .success {
+        color: green;
+      }
+      .error {
+        color: red;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Testing: <%= channel.name %></h1>
+    <p><strong>Embed Code:</strong> <%= channel.embedCode %></p>
+
+    <video id="video" controls width="800" height="450"></video>
+    <br /><br />
+
+    <button onclick="testDirect()">Test Direct URL</button>
+    <button onclick="testProxy()">Test Proxy URL</button>
+    <button onclick="testNative()">Test Native Support</button>
+    <button onclick="clearVideo()">Clear Video</button>
+
+    <div id="debug">
+      <h3>Debug Log:</h3>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+      const embedCode = "<%= channel.embedCode %>";
+      const video = document.getElementById("video");
+      const debug = document.getElementById("debug");
+      let currentHls = null;
+
+      function log(message, type = "info") {
+        console.log(message);
+        const p = document.createElement("p");
+        p.innerHTML = new Date().toLocaleTimeString() + ": " + message;
+        if (type === "success") p.classList.add("success");
+        if (type === "error") p.classList.add("error");
+        debug.appendChild(p);
+      }
+
+      function clearVideo() {
+        if (currentHls) {
+          currentHls.destroy();
+          currentHls = null;
+        }
+        video.src = "";
+        video.load();
+        log("Video cleared");
+      }
+
+      log("Embed code: " + embedCode);
+      log("HLS.js supported: " + Hls.isSupported());
+      log(
+        "Native HLS supported: " +
+          video.canPlayType("application/vnd.apple.mpegurl")
+      );
+
+      function testDirect() {
+        clearVideo();
+        log("🔄 Testing direct URL...");
+
+        if (Hls.isSupported()) {
+          currentHls = new Hls({
+            debug: true,
+            enableWorker: true,
+          });
+
+          currentHls.loadSource(embedCode);
+          currentHls.attachMedia(video);
+
+          currentHls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+            log(
+              "✅ Direct URL manifest parsed! Levels: " + data.levels.length,
+              "success"
+            );
+            video
+              .play()
+              .then(() => {
+                log("✅ Video started playing!", "success");
+              })
+              .catch((e) => {
+                log("❌ Play failed: " + e.message, "error");
+              });
+          });
+
+          currentHls.on(Hls.Events.ERROR, (event, data) => {
+            log("❌ Direct URL HLS error: " + JSON.stringify(data), "error");
+          });
+        } else {
+          log("❌ HLS.js not supported", "error");
+        }
+      }
+
+      function testProxy() {
+        clearVideo();
+        log("🔄 Testing proxy URL...");
+
+        const proxyUrl = `/proxy?url=${encodeURIComponent(embedCode)}`;
+        log("Proxy URL: " + proxyUrl);
+
+        if (Hls.isSupported()) {
+          currentHls = new Hls({
+            debug: true,
+            enableWorker: true,
+          });
+
+          currentHls.loadSource(proxyUrl);
+          currentHls.attachMedia(video);
+
+          currentHls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
+            log(
+              "✅ Proxy URL manifest parsed! Levels: " + data.levels.length,
+              "success"
+            );
+            video
+              .play()
+              .then(() => {
+                log("✅ Video started playing via proxy!", "success");
+              })
+              .catch((e) => {
+                log("❌ Play failed: " + e.message, "error");
+              });
+          });
+
+          currentHls.on(Hls.Events.ERROR, (event, data) => {
+            log("❌ Proxy URL HLS error: " + JSON.stringify(data), "error");
+          });
+        } else {
+          log("❌ HLS.js not supported", "error");
+        }
+      }
+
+      function testNative() {
+        clearVideo();
+        log("🔄 Testing native HLS support...");
+
+        if (video.canPlayType("application/vnd.apple.mpegurl")) {
+          video.src = embedCode;
+
+          video.addEventListener("loadedmetadata", function () {
+            log("✅ Native HLS loaded metadata!", "success");
+            video
+              .play()
+              .then(() => {
+                log("✅ Native video started playing!", "success");
+              })
+              .catch((e) => {
+                log("❌ Native play failed: " + e.message, "error");
+              });
+          });
+
+          video.addEventListener("error", function (e) {
+            log("❌ Native video error: " + e.message, "error");
+          });
+
+          video.load();
+        } else {
+          log("❌ Native HLS not supported", "error");
+        }
+      }
+    </script>
+  </body>
+</html>
